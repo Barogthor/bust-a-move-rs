@@ -29,36 +29,6 @@ pub struct ShooterAngle(f32);
 #[derive(Component, Debug)]
 pub struct ShooterSpriteIndex(usize);
 
-#[derive(Component)]
-struct AnimationIndices {
-    first: usize,
-    last: usize,
-}
-
-#[derive(Component, Deref, DerefMut)]
-struct AnimationTimer(Timer);
-
-fn animate_sprite(
-    time: Res<Time>,
-    mut query: Query<(
-        &AnimationIndices,
-        &mut AnimationTimer,
-        &mut TextureAtlasSprite,
-    )>,
-) {
-    for (indices, mut timer, mut sprite) in &mut query {
-        timer.tick(time.delta());
-        if timer.just_finished() {
-            sprite.index = if sprite.index == indices.last {
-                indices.first
-            } else {
-                sprite.index + 1
-            };
-        }
-    }
-}
-
-
 pub fn setup( mut commands: Commands,
               asset_server: Res<AssetServer>,
               mut texture_atlases: ResMut<Assets<TextureAtlas>>)
@@ -71,13 +41,12 @@ pub fn setup( mut commands: Commands,
                                 Some(Vec2::ONE), Some(Vec2::new(SHOOTER_SPRITE_X_START, SHOOTER_SPRITE_Y_START)));
 
     let tex_atlas_handle = texture_atlases.add(tex_atlas);
-    let animation_indices = AnimationIndices { first: 0, last: 63 };
     commands.spawn(Camera2dBundle::default());
     commands.spawn((
         SpriteSheetBundle {
             texture_atlas: tex_atlas_handle,
             sprite: TextureAtlasSprite {
-                index: animation_indices.first,
+                index: 0,
                 flip_x: true,
                 ..default()
             },
@@ -86,8 +55,6 @@ pub fn setup( mut commands: Commands,
         },
         Shooter{},
         ShooterAngle(0.0),
-        animation_indices,
-        AnimationTimer(Timer::from_seconds(0.1, TimerMode::Repeating)),
     ));
 }
 
@@ -99,7 +66,7 @@ pub fn rotate_shooter(
         if sprite.index == 0 && (keyboard.pressed(KeyCode::D) || keyboard.pressed(KeyCode::Q) ) {
             sprite.flip_x = !sprite.flip_x;
             sprite.index = 1;
-            angle.0 = 0.0;
+            angle.0 = DEGREES_PER_POS;
         }
         else if sprite.flip_x {
             if keyboard.pressed(KeyCode::Q) && sprite.index + 1 <= SHOOTER_MAX_INDICES
