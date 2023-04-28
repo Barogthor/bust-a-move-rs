@@ -21,8 +21,15 @@ pub enum BubbleColor {
     Blue, Red, Purple, Grey, Yellow, Green, Silver
 }
 
+#[derive(SystemSet, Debug, Eq, PartialEq, Hash, Clone)]
+pub enum SystemSet {
+    Movement,
+    Confinement
+}
+
 fn main() {
     App::new()
+        .configure_set(SystemSet::Movement.before(SystemSet::Confinement))
         .add_plugins(DefaultPlugins)
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
@@ -30,9 +37,9 @@ fn main() {
         .add_startup_system(setup)
         .add_system(rotate_shooter)
         .add_system(shoot_ball)
-        .add_system(move_shooted_bubble)
+        .add_system(move_shooted_bubble.in_set(SystemSet::Movement))
         .add_system(set_shooter_ball)
-        .add_system(bubble_collide_wall)
+        .add_system(bubble_collide_wall.in_set(SystemSet::Confinement))
         // .add_system(animate_sprite)
         .add_system(bevy::window::close_on_esc)
         .run()
@@ -227,7 +234,7 @@ pub fn build_wall(commands: &mut Commands) {
             transform: Transform::from_xyz(origin.x, origin.y, 0.0),
             ..default()
         },
-        Wall{width: wall_width, height: wall_height},
+        Wall{width: wall_width, height: wall_height, wtype: WallType::SideWall},
         Normal(Vec3::X)
         ));
     spawn_debug_point(commands, Vec2::new(origin.x - half_wall_width, origin.y - half_wall_height), Color::RED);
@@ -242,16 +249,30 @@ pub fn build_wall(commands: &mut Commands) {
                 custom_size: Some(Vec2::new(wall_width, wall_height)),
                 ..default()
             },
-            transform: Transform::from_xyz(150.0, 50.0, 0.0),
+            transform: Transform::from_xyz(origin.x, origin.y, 0.0),
             ..default()
         },
-        Wall{width: wall_width, height: wall_height},
+        Wall{width: wall_width, height: wall_height, wtype: WallType::SideWall},
         Normal(Vec3::NEG_X)
         ));
     spawn_debug_point(commands, Vec2::new(origin.x - half_wall_width, origin.y - half_wall_height), Color::RED);
     spawn_debug_point(commands, Vec2::new(origin.x + half_wall_width, origin.y - half_wall_height), Color::CRIMSON);
     spawn_debug_point(commands, Vec2::new(origin.x - half_wall_width, origin.y + half_wall_height), Color::ORANGE);
     spawn_debug_point(commands, Vec2::new(origin.x + half_wall_width, origin.y + half_wall_height), Color::MAROON);
+    let origin = Vec2::new(0.0, 50.0+half_wall_height-16.0);
+    commands.spawn((
+        SpriteBundle {
+            sprite: Sprite {
+                color: Color::GOLD,
+                custom_size: Some(Vec2::new(300.0, 32.0)),
+                ..default()
+            },
+            transform: Transform::from_xyz(origin.x, origin.y, 0.0),
+            ..default()
+        },
+        Wall{width: 300.0, height: 32.0, wtype: WallType::Roof},
+        Normal(Vec3::NEG_X)
+    ));
 
     spawn_debug_point(commands, Vec2::new(50.0, 0.0), Color::RED);
     spawn_debug_point(commands, Vec2::new(100.0, 50.0), Color::BLUE);
@@ -273,18 +294,26 @@ fn spawn_debug_point(commands: &mut Commands, origin: Vec2, color: Color) {
 #[derive(Component, DerefMut, Deref)]
 pub struct Normal(Vec3);
 
+#[derive(Eq, PartialEq)]
+pub enum WallType {
+    SideWall,
+    Roof
+}
+
 #[derive(Component)]
 pub struct Wall{
     width: f32,
-    height: f32
+    height: f32,
+    wtype: WallType
 }
 
 pub fn bubble_collide_wall(
-    mut shooted_bubble_query: Query<(&Transform, &mut Direction), With<ShootedBubble>>,
+    mut commands: Commands,
+    mut shooted_bubble_query: Query<(Entity, &mut Transform, &mut Direction), With<ShootedBubble>>,
     wall_query: Query<(&Normal, &Transform, &Wall), Without<Direction>>,
 ) {
     for (wall_normal, wall_transform, wall) in wall_query.iter() {
-        for (bubble_transform, mut bubble_dir) in shooted_bubble_query.iter_mut() {
+        for (entity, mut bubble_transform, mut bubble_dir) in shooted_bubble_query.iter_mut() {
             let wall_origin = Vec2::new(wall_transform.translation.x - wall.width/2.0, wall_transform.translation.y + wall.height/2.0);
             let bubble_collider = Circle::new(bubble_transform.translation.xy(),8.0);
             let a = Vec2::new(wall_origin.x, wall_origin.y);
@@ -293,10 +322,17 @@ pub fn bubble_collide_wall(
             let d = Vec2::new(wall_origin.x, wall_origin.y - wall.height);
             let segments = vec![Segment(a,b),Segment(b,c), Segment(c, d), Segment(a,d)];
             let r = Rect::new(wall_origin.x, wall_origin.y, c.x, c.y);
+
             if r.contains(bubble_transform.translation.xy())
                || segments.iter().any(|segment| bubble_collider.circle_intersect_segment(segment))
             {
-                bubble_dir.x *= -1.0;
+                if wall.wtype == WallType::SideWall {
+                    bubble_dir.x *= -1.0;
+                    bubble_transform.translation += bubble_dir.0;
+                }
+                else {
+                    commands.entity(entity).remove::<(ShooterBubble, Direction)>();
+                }
             }
         }
     }
